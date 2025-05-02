@@ -773,7 +773,7 @@ exports.generate2025Data = async (req, res) => {
         const salvage = Number(item.Salvage_Value);
         const months = Number(item.Economic_Life_in_months);
 
-        if (isNaN(resale) || isNaN(salvage) || isNaN(months)) return item;
+        if (isNaN(originalPrice) || isNaN(salvage) || isNaN(months)) return item;
         const baseYear = year;
         const lastDep = item.LastDepreciatedYear || baseYear;
     
