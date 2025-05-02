@@ -740,7 +740,6 @@ exports.generate2025Data = async (req, res) => {
       return res.status(400).json({ message: 'Invalid price increase rate' });
     }
 
-    // Step 1: Get all year-based collections
     const collections = await mongoose.connection.db.listCollections().toArray();
     const yearCollections = collections
       .map(c => parseInt(c.name))
@@ -750,76 +749,73 @@ exports.generate2025Data = async (req, res) => {
     const latestYear = yearCollections[yearCollections.length - 1];
     const newYear = latestYear + 1;
     const newCollectionName = newYear.toString();
-    const existingCollection = await mongoose.connection.db
-  .listCollections({ name: newCollectionName }).toArray();
 
-  if (existingCollection.length > 0) {
-    return res.status(400).json({
-      message: `❌ Data for year ${newYear} already exists. Generation aborted.`,
-      year: newYear
-    });
-      }
+    const existing = await mongoose.connection.db.listCollections({ name: newCollectionName }).toArray();
+    if (existing.length > 0) {
+      return res.status(400).json({ message: `❌ Data for year ${newYear} already exists.` });
+    }
 
-    console.log(`📅 Generating data for: ${newYear}`);
-    console.log(`🧮 Applying 1 year depreciation to all previous years (${yearCollections.join(", ")})`);
-
-    // Step 2: Depreciate ALL previous years
+    // Step 1: Depreciate all previous years
     for (const year of yearCollections) {
       const collection = mongoose.connection.db.collection(year.toString());
-      const data = await collection.find().toArray();
+      const cursor = collection.find();
+      const bulkOps = [];
 
-      const updatedData = data.map(item => {
+      while (await cursor.hasNext()) {
+        const item = await cursor.next();
         const originalPrice = Number(item.Original_price);
         const salvage = Number(item.Salvage_Value);
         const months = Number(item.Economic_Life_in_months);
 
-        if (isNaN(originalPrice) || isNaN(salvage) || isNaN(months)) return item;
-        const baseYear = year;
-        const lastDep = item.LastDepreciatedYear || baseYear;
-    
-        // 🛑 Skip if already depreciated for this generation year
-        if (item.LastDepreciatedYear === newYear) return item;
+        if (isNaN(originalPrice) || isNaN(salvage) || isNaN(months)) continue;
+
         const yearsPassed = newYear - year;
-
-
         const annualDep = originalPrice * (1 - salvage) / (months / 12);
-        const depreciated = Math.round(Math.max(
-          originalPrice - (yearsPassed * annualDep),
-          originalPrice * salvage
-          ));
+        const depreciated = Math.round(Math.max(originalPrice - (yearsPassed * annualDep), originalPrice * salvage));
 
-        return {
-          ...item,
-          Current_Market_Year_Resale_Value: depreciated,
-          LastDepreciatedYear: lastDep
-        };
-      });
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: item._id },
+            update: {
+              $set: {
+                Current_Market_Year_Resale_Value: depreciated,
+                LastDepreciatedYear: newYear
+              }
+            }
+          }
+        });
+      }
 
-      // Overwrite the current year with newly depreciated data
-      await collection.deleteMany({});
-      await collection.insertMany(updatedData);
+      if (bulkOps.length) {
+        await collection.bulkWrite(bulkOps);
+      }
     }
-  
 
-    // Step 3: Generate the new year's data
-    const previousYearData = await mongoose.connection.db.collection(latestYear.toString()).find().toArray();
+    // Step 2: Create new year collection
+    const latestCollection = mongoose.connection.db.collection(latestYear.toString());
+    const cursor = latestCollection.find();
+    const newCollection = mongoose.connection.db.collection(newCollectionName);
+    const bulkInserts = [];
 
-    const newYearData = previousYearData.map(item => {
+    while (await cursor.hasNext()) {
+      const item = await cursor.next();
       const originalPrice = Number(item.Original_price);
       const salvage = Number(item.Salvage_Value);
       const months = Number(item.Economic_Life_in_months);
 
-      if (isNaN(originalPrice) || isNaN(salvage) || isNaN(months)) return item;
+      if (isNaN(originalPrice) || isNaN(salvage) || isNaN(months)) continue;
 
       const inflated = Math.round(originalPrice * (1 + priceIncreaseRate / 100));
-      return {
+      bulkInserts.push({
         ...item,
         Original_price: inflated,
         Current_Market_Year_Resale_Value: inflated
-      };
-    });
+      });
+    }
 
-    await mongoose.connection.db.collection(newCollectionName).insertMany(newYearData);
+    if (bulkInserts.length) {
+      await newCollection.insertMany(bulkInserts);
+    }
 
     res.status(200).json({ message: `${newYear} data generated successfully`, year: newYear });
 
