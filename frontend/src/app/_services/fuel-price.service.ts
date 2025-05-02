@@ -7,7 +7,7 @@ import { Observable } from 'rxjs';
   providedIn: 'root',
 })
 export class FuelPriceService {
-  private API_URL = 'http://localhost:8082/api/';
+  private API_URL = 'https://idot-project-backend.onrender.com/api';
 
   constructor(private http: HttpClient) {}
   getFuelPrice(county: string, quarter: string, fuelType: string): Observable<any> {
