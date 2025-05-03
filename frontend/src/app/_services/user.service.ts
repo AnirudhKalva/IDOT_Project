@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { Equipment } from '../board-admin/board-admin.component';
 import { StorageService } from './storage.service';
 
-const API_URL = 'https://idot-project-backend-three.vercel.app/api/test/';
+const API_URL = 'https://idot-project-backend.onrender.com/api/test/';
 //const API_URL = 'https://idot-project-backend.vercel.app/api/test/';
 
 
