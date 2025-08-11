@@ -49,7 +49,8 @@ module.exports = function(app) {
   app.get('/api/test/currentyear', [authJwt.verifyToken], dataController.getCurrentYear);
   app.post('/api/test/addequipment', [authJwt.verifyToken, authJwt.isAdmin], dataController.addNewEquipment);
   app.post('/api/test/exportdata', [authJwt.verifyToken, authJwt.isAdmin], dataController.exportEquipmentData);
-  app.post("/api/test/manual-depreciation", dataController.manualDepreciateAllYears);
+ // app.post("/api/test/manual-depreciation", dataController.manualDepreciateAllYears);
+ // app.post('/api/test/revert-depreciation-2025', dataController.revertDepreciationTo2025);
   
 
 

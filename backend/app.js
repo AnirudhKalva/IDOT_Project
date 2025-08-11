@@ -1,4 +1,4 @@
-require('dotenv').config(); // Ensure this is at the top to load environment variables early
+require('dotenv').config();
 
 const express = require("express");
 const cors = require("cors");
@@ -11,7 +11,7 @@ const path = __dirname + '/app/views/';
 app.use(express.static(path));
 
 const corsOptions = {
-  origin: [ "http://localhost:4200", "https://idot-project-beta.vercel.app"],
+  origin: ["http://localhost:4200", "https://idot-project-beta.vercel.app"],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
@@ -25,18 +25,15 @@ app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 app.use(cookieSession({
     name: "bezkoder-session",
-    secret: process.env.COOKIE_SECRET, // Use environment variable for the secret
+    secret: process.env.COOKIE_SECRET,
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production', // Enable secure cookies in production
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'lax', // Set to 'strict' if you want to restrict to same site
-    path: '/' // Explicitly set the path if needed
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: 'lax',
+    path: '/'
 }));
 
-
-
 const db = require("./app/models");
-const modeldataconnection = require("./app/models").data;
 const Role = db.role;
 
 db.mongoose
@@ -53,10 +50,8 @@ db.mongoose
 require("./app/routes/auth.routes")(app);
 require("./app/routes/user.routes")(app);
 
-const PORT = process.env.PORT || 8082;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}.`);
-});
+const fuelRoutes = require('./app/routes/fuel-price.routes');
+app.use('/api/fuel', fuelRoutes);
 
 async function initial() {
   const count = await Role.estimatedDocumentCount();
@@ -69,5 +64,4 @@ async function initial() {
   }
 }
 
-const fuelRoutes = require('./app/routes/fuel-price.routes');
-app.use('/api/fuel', fuelRoutes);
+module.exports = app; // Export app instead of listening here

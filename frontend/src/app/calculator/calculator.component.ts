@@ -133,7 +133,7 @@ export class CalculatorComponent {
         this.hours +
         Number(this.operCost)
     );
-    this.rateUsed = Number(this.rateUsed.toFixed(2));
+    // Use full precision, no rounding
   }
 
   updateStandByRate() {
@@ -144,7 +144,7 @@ export class CalculatorComponent {
         this.hours) *
         Number(this.operCostMultiplier)
     );
-    this.standByRate = Number(this.standByRate.toFixed(2));
+    // Use full precision, no rounding
   }
 
   getFuelType(value: number): string {

@@ -673,7 +673,7 @@ const  transformEquipmentData = (equipment) => {
         if (isNaN(numValue)) {
           equipment[field] = 0;  // Default to 0 if the conversion does not produce a number
         } else {
-          equipment[field] = Number(numValue.toFixed(2)); // Round to two decimal places and convert back to number
+          equipment[field] = numValue; // Use full precision, no rounding
         }
       }
     }
@@ -755,7 +755,7 @@ exports.generate2025Data = async (req, res) => {
       return res.status(400).json({ message: `❌ Data for year ${newYear} already exists.` });
     }
 
-    // Step 1: Depreciate all previous years
+    // Step 1: Depreciate all previous years and recalculate overhead costs
     for (const year of yearCollections) {
       const collection = mongoose.connection.db.collection(year.toString());
       const cursor = collection.find();
@@ -773,13 +773,18 @@ exports.generate2025Data = async (req, res) => {
         const annualDep = originalPrice * (1 - salvage) / (months / 12);
         const depreciated = Math.round(Math.max(originalPrice - (yearsPassed * annualDep), originalPrice * salvage));
 
+        // Calculate the new overhead cost based on the updated resale value
+        const usageRate = item.Monthly_use_hours / 176;
+        const newOverheadCost = (item.Annual_Overhead_rate * depreciated) / 12 / usageRate;
+
         bulkOps.push({
           updateOne: {
             filter: { _id: item._id },
             update: {
               $set: {
                 Current_Market_Year_Resale_Value: depreciated,
-                LastDepreciatedYear: newYear
+                LastDepreciatedYear: newYear,
+                Overhead_Ownership_cost_Monthly: newOverheadCost
               }
             }
           }
@@ -791,7 +796,7 @@ exports.generate2025Data = async (req, res) => {
       }
     }
 
-    // Step 2: Create new year collection
+    // Step 2: Create new year collection with proper calculations
     const latestCollection = mongoose.connection.db.collection(latestYear.toString());
     const cursor = latestCollection.find();
     const newCollection = mongoose.connection.db.collection(newCollectionName);
@@ -806,11 +811,17 @@ exports.generate2025Data = async (req, res) => {
       if (isNaN(originalPrice) || isNaN(salvage) || isNaN(months)) continue;
 
       const inflated = Math.round(originalPrice * (1 + priceIncreaseRate / 100));
-      bulkInserts.push({
+      
+      // Create new equipment with inflated price and recalculate all costs
+      const newEquipment = {
         ...item,
         Original_price: inflated,
         Current_Market_Year_Resale_Value: inflated
-      });
+      };
+
+      // Recalculate all costs including overhead
+      const calculatedEquipment = calculateDefaultValues(newEquipment, newYear, newYear);
+      bulkInserts.push(calculatedEquipment);
     }
 
     if (bulkInserts.length) {
@@ -924,7 +935,7 @@ const calculateDefaultValues = (equipment, latestYear, ModelYear) => {
         )
         : 0
   );
-  equipment.Usage_rate = Number(Number((equipment.Monthly_use_hours / 176)).toFixed(3));
+  equipment.Usage_rate = equipment.Monthly_use_hours / 176; // Use full precision, no rounding
 
   const fuelType = equipment['Reimbursable Fuel_type (1 diesel, 2 gas, 3 other)'] || 0;
   const fuelMultiplier = (Math.abs(fuelType - 1) < 0.0001) ? 0.04 : (Math.abs(fuelType - 2) < 0.0001) ? 0.06 : 0;
@@ -1186,7 +1197,7 @@ exports.exportEquipmentData = async (req, res) => {
 };
 
 
-exports.manualDepreciateAllYears = async (req, res) => {
+/*exports.manualDepreciateAllYears = async (req, res) => {
   try {
     const { depreciationYear } = req.body;
 
@@ -1249,7 +1260,128 @@ exports.manualDepreciateAllYears = async (req, res) => {
     console.error("❌ Manual depreciation error:", err);
     res.status(500).json({ message: "Internal server error" });
   }
-};
+};*/
+
+/*exports.revertDepreciationTo2025 = async (req, res) => {
+  try {
+    console.log("🔄 Starting depreciation reversion to 2025...");
+    
+    // Get all year collections
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    const yearCollections = collections
+      .map(c => parseInt(c.name))
+      .filter(year => !isNaN(year))
+      .sort((a, b) => a - b);
+
+    console.log(`📅 Found year collections: ${yearCollections.join(', ')}`);
+    
+    // Set 2025 as the target latest year
+    const targetLatestYear = 2025;
+    
+    if (!yearCollections.includes(targetLatestYear)) {
+      return res.status(400).json({ 
+        message: `❌ Year ${targetLatestYear} collection not found. Cannot proceed with reversion.` 
+      });
+    }
+
+    let totalUpdated = 0;
+    let totalCollections = 0;
+
+    // Process each year collection
+    for (const year of yearCollections) {
+      if (year > targetLatestYear) {
+        console.log(`⏭️ Skipping year ${year} as it's beyond target year ${targetLatestYear}`);
+        continue;
+      }
+
+      console.log(`🔄 Processing year ${year}...`);
+      const collection = mongoose.connection.db.collection(year.toString());
+      const cursor = collection.find();
+      const bulkOps = [];
+      let collectionUpdated = 0;
+
+      while (await cursor.hasNext()) {
+        const item = await cursor.next();
+        const originalPrice = Number(item.Original_price);
+        const salvage = Number(item.Salvage_Value);
+        const months = Number(item.Economic_Life_in_months);
+        const modelYear = Number(item.Model_Year) || year;
+
+        if (isNaN(originalPrice) || isNaN(salvage) || isNaN(months)) {
+          console.log(`⚠️ Skipping item ${item._id} due to invalid data`);
+          continue;
+        }
+
+        // Calculate correct depreciation based on 2025 as latest year
+        const yearsPassed = targetLatestYear - modelYear;
+        const annualDep = originalPrice * (1 - salvage) / (months / 12);
+        const correctResaleValue = Math.round(
+          Math.max(
+            originalPrice - (yearsPassed * annualDep), 
+            originalPrice * salvage
+          )
+        );
+
+        // Calculate correct overhead cost based on the corrected resale value
+        const usageRate = (item.Monthly_use_hours || 0) / 176;
+        const correctOverheadCost = usageRate > 0 ? 
+          (item.Annual_Overhead_rate * correctResaleValue) / 12 / usageRate : 0;
+
+        // Recalculate all costs using the corrected resale value
+        const correctedEquipment = {
+          ...item,
+          Current_Market_Year_Resale_Value: correctResaleValue,
+          LastDepreciatedYear: targetLatestYear
+        };
+
+        // Use the existing calculateDefaultValues function with 2025 as latest year
+        const recalculatedEquipment = calculateDefaultValues(correctedEquipment, targetLatestYear, modelYear);
+
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: item._id },
+            update: { $set: recalculatedEquipment }
+          }
+        });
+
+        collectionUpdated++;
+      }
+
+      if (bulkOps.length > 0) {
+        await collection.bulkWrite(bulkOps);
+        console.log(`✅ Updated ${collectionUpdated} items in year ${year}`);
+        totalUpdated += collectionUpdated;
+        totalCollections++;
+      }
+    }
+
+    // Update the current year to 2025 if it's not already set
+    const currentYearCollection = mongoose.connection.db.collection('currentyear');
+    await currentYearCollection.updateOne(
+      {}, 
+      { $set: { currentyear: targetLatestYear } }, 
+      { upsert: true }
+    );
+
+    console.log(`🎯 Depreciation reversion completed successfully!`);
+    console.log(`📊 Total items updated: ${totalUpdated}`);
+    console.log(`📁 Total collections processed: ${totalCollections}`);
+
+    res.status(200).json({ 
+      message: `✅ Depreciation successfully reverted to ${targetLatestYear}`,
+      totalUpdated,
+      totalCollections,
+      targetYear: targetLatestYear
+    });
+
+  } catch (error) {
+    console.error("❌ Error during depreciation reversion:", error);
+    res.status(500).json({ 
+      message: "Error reverting depreciation values",
+      error: error.message 
+    });
+  }
+};*/
 
 
 
